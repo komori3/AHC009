@@ -185,7 +185,8 @@ template<typename T> bool chmin(T& a, const T& b) { if (a > b) { a = b; return t
 using std::vector, std::string;
 using std::cin, std::cout, std::cerr, std::endl;
 using ll = long long;
-
+using pii = std::pair<int, int>;
+using pll = std::pair<ll, ll>;
 
 
 struct TestCase {
@@ -222,8 +223,139 @@ struct TestCase {
             }
             oss << '\n';
         }
+        return oss.str();
     }
 };
+
+struct Solver {
+    TestCase tc;
+    Solver(const TestCase& tc) : tc(tc) {}
+    string solve() {
+        // Skate みたいな感じで"滑る"移動をする
+    // "滑る"移動のみで到達できない場合はなるべく近くまで移動して、複数回に分けて確率を流すイメージ？
+
+        auto [si, sj, ti, tj, p, H, V] = tc;
+
+        constexpr int inf = INT_MAX / 8;
+        constexpr int di[] = { 0, -1, 0, 1 };
+        constexpr int dj[] = { 1, 0, -1, 0 };
+        const string d2c = "RULD";
+        int c2d[256];
+        c2d['R'] = 0; c2d['U'] = 1; c2d['L'] = 2; c2d['D'] = 3;
+
+        int dist_straight[4][20][20];
+        Fill(dist_straight, -1);
+
+        // 右にいくつ進めるか？を前計算
+        {
+            auto& rdist = dist_straight[0];
+            for (int i = 0; i < 20; i++) {
+                rdist[i][19] = 0;
+                int d = 0;
+                for (int j = 18; j >= 0; j--) {
+                    if (H[i][j] || (i == ti && j == tj)) d = -1;
+                    d++;
+                    rdist[i][j] = d;
+                }
+            }
+        }
+        {
+            auto& udist = dist_straight[1];
+            for (int j = 0; j < 20; j++) {
+                udist[0][j] = 0;
+                int d = 0;
+                for (int i = 1; i <= 19; i++) {
+                    if (V[i - 1][j] || (i == ti && j == tj)) d = -1;
+                    d++;
+                    udist[i][j] = d;
+                }
+            }
+        }
+        {
+            auto& ldist = dist_straight[2];
+            for (int i = 0; i < 20; i++) {
+                ldist[i][0] = 0;
+                int d = 0;
+                for (int j = 1; j <= 19; j++) {
+                    if (H[i][j - 1] || (i == ti && j == tj)) d = -1;
+                    d++;
+                    ldist[i][j] = d;
+                }
+            }
+        }
+        {
+            auto& ddist = dist_straight[3];
+            for (int j = 0; j < 20; j++) {
+                ddist[19][j] = 0;
+                int d = 0;
+                for (int i = 18; i >= 0; i--) {
+                    if (V[i][j] || (i == ti && j == tj)) d = -1;
+                    d++;
+                    ddist[i][j] = d;
+                }
+            }
+        }
+
+        // grid 上の dijkstra
+        using Edge = std::tuple<int, int, int>;
+        using PQ = std::priority_queue<Edge, vector<Edge>, std::greater<Edge>>;
+
+        int dist[20][20];
+        pii prev[20][20]; // recon
+        Fill(dist, inf); Fill(prev, pii(-1, -1));
+
+        PQ pq;
+        pq.emplace(0, si, sj);
+        dist[si][sj] = 0;
+        while (!pq.empty()) {
+            auto [mincost, i, j] = pq.top(); pq.pop();
+            if (dist[i][j] < mincost) continue;
+            // 障害物にぶつかる or ゴールに到達するまで直進
+            for (int d = 0; d < 4; d++) {
+                int move_len = dist_straight[d][i][j];
+                if (!move_len) continue;
+                int ni = i + di[d] * move_len, nj = j + dj[d] * move_len;
+                if (chmin(dist[ni][nj], dist[i][j] + move_len)) {
+                    pq.emplace(dist[ni][nj], ni, nj);
+                    prev[ni][nj] = pii(d, move_len);
+                }
+            }
+        }
+
+        string path;
+        int i = ti, j = tj;
+        while (true) {
+            auto [d, len] = prev[i][j];
+            if (d == -1) break;
+            path += string(len + 7, d2c[d]);
+            i -= di[d] * len;
+            j -= dj[d] * len;
+        }
+        reverse(path.begin(), path.end());
+        return path.size() > 200 ? "" : path;
+    }
+};
+
+void batch_test() {
+    for (int seed = 0; seed < 100; seed++) {
+        std::ifstream ifs(format("tools/in/%04d.txt", seed));
+        std::istream& in = ifs;
+        std::ofstream ofs(format("tools/out/%04d.txt", seed));
+        std::ostream& out = ofs;
+
+        TestCase tc(in);
+
+        Solver solver(tc);
+        auto ans = solver.solve();
+
+        dump(seed, ans);
+
+        out << ans << endl;
+
+        ifs.close();
+        ofs.close();
+    }
+}
 
 int main(int argc, char** argv) {
 
@@ -231,7 +363,22 @@ int main(int argc, char** argv) {
     cv::utils::logging::setLogLevel(cv::utils::logging::LogLevel::LOG_LEVEL_SILENT);
 #endif
 
+#ifdef _MSC_VER
+    batch_test();
+#else
+    std::istream& in = cin;
+    std::ostream& out = cout;
 
+    TestCase tc(in);
+
+    Solver solver(tc);
+    auto ans = solver.solve();
+
+    dump(ans);
+
+    out << ans << endl;
+
+#endif
 
     return 0;
 }
