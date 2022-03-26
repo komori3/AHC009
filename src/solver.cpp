@@ -189,36 +189,52 @@ using pii = std::pair<int, int>;
 using pll = std::pair<ll, ll>;
 
 
+
+constexpr int N = 20;
+constexpr int L = 200;
+constexpr int inf = INT_MAX / 8;
+constexpr int di[] = { 0, -1, 0, 1 };
+constexpr int dj[] = { 1, 0, -1, 0 };
+const string d2c = "RULD";
+int c2d[256];
+
+
 struct TestCase {
     int si, sj, ti, tj;
     double p;
-    int h[20][19];
-    int v[19][20];
+    int h[N][N - 1];
+    int v[N - 1][N];
     TestCase(std::istream& in) {
-        vector<string> H(20), V(19);
+        vector<string> H(N), V(N - 1);
         in >> si >> sj >> ti >> tj >> p >> H >> V;
-        for (int i = 0; i < 20; i++) {
-            for (int j = 0; j < 19; j++) {
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < N - 1; j++) {
                 h[i][j] = H[i][j] - '0';
             }
         }
-        for (int i = 0; i < 19; i++) {
-            for (int j = 0; j < 20; j++) {
+        for (int i = 0; i < N - 1; i++) {
+            for (int j = 0; j < N; j++) {
                 v[i][j] = V[i][j] - '0';
             }
         }
     }
+    inline bool can_move(int i, int j, int d) const {
+        if (d == 0) return j < N - 1 && !h[i][j]; // R
+        if (d == 1) return i > 0 && !v[i - 1][j];
+        if (d == 2) return j > 0 && !h[i][j - 1];
+        return i < N - 1 && !v[i][j];
+    }
     string stringify() const {
         std::ostringstream oss;
         oss << format("%d %d %d %d %f\n", si, sj, ti, tj, p);
-        for (int i = 0; i < 20; i++) {
-            for (int j = 0; j < 19; j++) {
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < N - 1; j++) {
                 oss << h[i][j];
             }
             oss << '\n';
         }
-        for (int i = 0; i < 19; i++) {
-            for (int j = 0; j < 20; j++) {
+        for (int i = 0; i < N - 1; i++) {
+            for (int j = 0; j < N; j++) {
                 oss << v[i][j];
             }
             oss << '\n';
@@ -234,25 +250,18 @@ struct Solver {
         // Skate みたいな感じで"滑る"移動をする
     // "滑る"移動のみで到達できない場合はなるべく近くまで移動して、複数回に分けて確率を流すイメージ？
 
-        auto [si, sj, ti, tj, p, H, V] = tc;
+        auto [si, sj, ti, tj, p, H, V] = tc;        
 
-        constexpr int inf = INT_MAX / 8;
-        constexpr int di[] = { 0, -1, 0, 1 };
-        constexpr int dj[] = { 1, 0, -1, 0 };
-        const string d2c = "RULD";
-        int c2d[256];
-        c2d['R'] = 0; c2d['U'] = 1; c2d['L'] = 2; c2d['D'] = 3;
-
-        int dist_straight[4][20][20];
+        int dist_straight[4][N][N];
         Fill(dist_straight, -1);
 
         // 右にいくつ進めるか？を前計算
         {
             auto& rdist = dist_straight[0];
-            for (int i = 0; i < 20; i++) {
-                rdist[i][19] = 0;
+            for (int i = 0; i < N; i++) {
+                rdist[i][N - 1] = 0;
                 int d = 0;
-                for (int j = 18; j >= 0; j--) {
+                for (int j = N - 2; j >= 0; j--) {
                     if (H[i][j] || (i == ti && j == tj)) d = -1;
                     d++;
                     rdist[i][j] = d;
@@ -261,10 +270,10 @@ struct Solver {
         }
         {
             auto& udist = dist_straight[1];
-            for (int j = 0; j < 20; j++) {
+            for (int j = 0; j < N; j++) {
                 udist[0][j] = 0;
                 int d = 0;
-                for (int i = 1; i <= 19; i++) {
+                for (int i = 1; i <= N - 1; i++) {
                     if (V[i - 1][j] || (i == ti && j == tj)) d = -1;
                     d++;
                     udist[i][j] = d;
@@ -273,10 +282,10 @@ struct Solver {
         }
         {
             auto& ldist = dist_straight[2];
-            for (int i = 0; i < 20; i++) {
+            for (int i = 0; i < N; i++) {
                 ldist[i][0] = 0;
                 int d = 0;
-                for (int j = 1; j <= 19; j++) {
+                for (int j = 1; j <= N - 1; j++) {
                     if (H[i][j - 1] || (i == ti && j == tj)) d = -1;
                     d++;
                     ldist[i][j] = d;
@@ -285,10 +294,10 @@ struct Solver {
         }
         {
             auto& ddist = dist_straight[3];
-            for (int j = 0; j < 20; j++) {
-                ddist[19][j] = 0;
+            for (int j = 0; j < N; j++) {
+                ddist[N - 1][j] = 0;
                 int d = 0;
-                for (int i = 18; i >= 0; i--) {
+                for (int i = N - 2; i >= 0; i--) {
                     if (V[i][j] || (i == ti && j == tj)) d = -1;
                     d++;
                     ddist[i][j] = d;
@@ -300,8 +309,8 @@ struct Solver {
         using Edge = std::tuple<int, int, int>;
         using PQ = std::priority_queue<Edge, vector<Edge>, std::greater<Edge>>;
 
-        int dist[20][20];
-        pii prev[20][20]; // recon
+        int dist[N][N];
+        pii prev[N][N]; // recon
         Fill(dist, inf); Fill(prev, pii(-1, -1));
 
         PQ pq;
@@ -336,7 +345,45 @@ struct Solver {
     }
 };
 
+int compute_score(const TestCase& tc, const string& ans) {
+    if (ans.size() > 200) {
+        dump("too long");
+        return -1;
+    }
+    auto crt = make_vector(0.0, N, N);
+    crt[tc.si][tc.sj] = 1.0;
+    double sum = 0.0, goal = 0.0;
+    for (int t = 0; t < ans.size(); t++) {
+        auto next = make_vector(0.0, N, N);
+        int d = c2d[ans[t]];
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < N; j++) {
+                if (crt[i][j] > 0.0) {
+                    if (tc.can_move(i, j, d)) {
+                        int i2 = i + di[d];
+                        int j2 = j + dj[d];
+                        next[i2][j2] += crt[i][j] * (1.0 - tc.p);
+                        next[i][j] += crt[i][j] * tc.p;
+                    }
+                    else {
+                        next[i][j] += crt[i][j];
+                    }
+                }
+            }
+        }
+        crt = next;
+        sum += crt[tc.ti][tc.tj] * (2 * L - t);
+        goal += crt[tc.ti][tc.tj];
+        crt[tc.ti][tc.tj] = 0.0;
+    }
+    crt[tc.ti][tc.tj] = goal;
+    return (int)round((1e8 * sum / (2 * L)));
+}
+
 void batch_test() {
+
+    ll total = 0;
+
     for (int seed = 0; seed < 100; seed++) {
         std::ifstream ifs(format("tools/in/%04d.txt", seed));
         std::istream& in = ifs;
@@ -348,13 +395,17 @@ void batch_test() {
         Solver solver(tc);
         auto ans = solver.solve();
 
-        dump(seed, ans);
+        total += compute_score(tc, ans);
+
+        dump(seed, compute_score(tc, ans));
 
         out << ans << endl;
 
         ifs.close();
         ofs.close();
     }
+
+    cout << total << endl;
 }
 
 int main(int argc, char** argv) {
@@ -362,6 +413,8 @@ int main(int argc, char** argv) {
 #ifdef HAVE_OPENCV_HIGHGUI
     cv::utils::logging::setLogLevel(cv::utils::logging::LogLevel::LOG_LEVEL_SILENT);
 #endif
+
+    c2d['R'] = 0; c2d['U'] = 1; c2d['L'] = 2; c2d['D'] = 3;
 
 #ifdef _MSC_VER
     batch_test();
