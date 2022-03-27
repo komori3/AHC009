@@ -199,6 +199,7 @@ const string d2c = "RULD";
 int c2d[256];
 
 
+
 struct TestCase {
     int si, sj, ti, tj;
     double p;
@@ -243,19 +244,55 @@ struct TestCase {
     }
 };
 
+double compute_score(const TestCase& tc, const string& ans) {
+    if (ans.size() > 200) {
+        //dump("too long");
+        return -1;
+    }
+    auto crt = make_vector(0.0, N, N);
+    crt[tc.si][tc.sj] = 1.0;
+    double sum = 0.0, goal = 0.0;
+    for (int t = 0; t < ans.size(); t++) {
+        auto next = make_vector(0.0, N, N);
+        int d = c2d[ans[t]];
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < N; j++) {
+                if (crt[i][j] > 0.0) {
+                    if (tc.can_move(i, j, d)) {
+                        int i2 = i + di[d];
+                        int j2 = j + dj[d];
+                        next[i2][j2] += crt[i][j] * (1.0 - tc.p);
+                        next[i][j] += crt[i][j] * tc.p;
+                    }
+                    else {
+                        next[i][j] += crt[i][j];
+                    }
+                }
+            }
+        }
+        crt = next;
+        sum += crt[tc.ti][tc.tj] * (2 * L - t);
+        goal += crt[tc.ti][tc.tj];
+        crt[tc.ti][tc.tj] = 0.0;
+    }
+    crt[tc.ti][tc.tj] = goal;
+    return 1e8 * sum / (2 * L);
+}
+
 struct Solver {
+
+    Timer timer;
     TestCase tc;
-    Solver(const TestCase& tc) : tc(tc) {}
-    string solve() {
-        // Skate みたいな感じで"滑る"移動をする
-    // "滑る"移動のみで到達できない場合はなるべく近くまで移動して、複数回に分けて確率を流すイメージ？
 
-        auto [si, sj, ti, tj, p, H, V] = tc;        
+    int dist_straight[4][N][N];
 
-        int dist_straight[4][N][N];
+    Solver(const TestCase& tc) : tc(tc) {
         Fill(dist_straight, -1);
+    }
 
-        // 右にいくつ進めるか？を前計算
+    void calc_dist_straight() {
+        // いくつ進めるか？を前計算
+        auto [si, sj, ti, tj, p, H, V] = tc;
         {
             auto& rdist = dist_straight[0];
             for (int i = 0; i < N; i++) {
@@ -304,14 +341,20 @@ struct Solver {
                 }
             }
         }
+    }
 
+    struct DijkstraResult {
+        vector<vector<int>> dist;
+        vector<vector<pii>> prev;
+    };
+
+    DijkstraResult dijkstra(int si, int sj) const {
+        auto dist = make_vector(inf, N, N);
+        auto prev = make_vector(pii(-1, -1), N, N);
+        
         // grid 上の dijkstra
         using Edge = std::tuple<int, int, int>;
         using PQ = std::priority_queue<Edge, vector<Edge>, std::greater<Edge>>;
-
-        int dist[N][N];
-        pii prev[N][N]; // recon
-        Fill(dist, inf); Fill(prev, pii(-1, -1));
 
         PQ pq;
         pq.emplace(0, si, sj);
@@ -331,60 +374,315 @@ struct Solver {
             }
         }
 
-        string path;
+        return { dist, prev };
+    }
+    
+    std::pair<double, string> solve_primary() {
+        // Skate みたいな感じで"滑る"移動をする
+
+        auto [si, sj, ti, tj, p, H, V] = tc;
+
+        auto [dist, prev] = dijkstra(si, sj);
+
+        if (false) {
+            for (const auto& v : dist) {
+                for (int x : v) {
+                    cerr << format("%3d ", x == inf ? -1 : x);
+                }
+                cerr << endl;
+            }
+        }
+
+        auto to_str = [](const vector<pii>& ppath, int margin = 0) {
+            string str;
+            if (ppath.empty()) return str;
+            for (const auto [d, len] : ppath) {
+                str += string(len + margin, d2c[d]);
+            }
+            return str;
+        };
+
+        vector<pii> ppath;
         int i = ti, j = tj;
         while (true) {
             auto [d, len] = prev[i][j];
             if (d == -1) break;
-            path += string(len + 7, d2c[d]);
+            ppath.emplace_back(d, len);
             i -= di[d] * len;
             j -= dj[d] * len;
         }
-        reverse(path.begin(), path.end());
-        return path.size() > 200 ? "" : path;
-    }
-};
+        if (ppath.empty()) return { -1.0, "" };
 
-int compute_score(const TestCase& tc, const string& ans) {
-    if (ans.size() > 200) {
-        dump("too long");
-        return -1;
+        reverse(ppath.begin(), ppath.end());
+
+        string best_ans;
+        double best_score = 0;
+        int best_margin = -1;
+        // 適宜マージンを入れて最もよいものを採用
+        // TODO: 山登り or 焼きなまし
+        for (int m = 0;; m++) {
+            auto path = to_str(ppath, m);
+            if (path.size() > L) break;
+            double score = compute_score(tc, path);
+            if (best_score < score) {
+                best_score = score;
+                best_margin = m;
+                best_ans = path;
+            }
+        }
+
+        auto get_temp = [](double startTemp, double endTemp, double t, double T) {
+            return endTemp + (startTemp - endTemp) * (T - t) / T;
+        };
+
+        for (auto& [d, len] : ppath) len += best_margin;
+        while (timer.elapsed_ms() < 1000) {
+            int r = rnd.next_int(3);
+            int i, j;
+            if (r == 0) {
+                // inc
+                i = rnd.next_int(ppath.size());
+                ppath[i].second++;
+            }
+            else if (r == 1) {
+                // dec
+                i = rnd.next_int(ppath.size());
+                if (ppath[i].second == 0) continue;
+                ppath[i].second--;
+            }
+            else if (r == 2) {
+                // move
+                i = rnd.next_int(ppath.size());
+                do {
+                    j = rnd.next_int(ppath.size());
+                } while (i == j);
+                if (ppath[i].second == 0) continue;
+                ppath[i].second--; ppath[j].second++;
+            }
+
+            auto path = to_str(ppath);
+            double score = compute_score(tc, path);
+            double diff = score - best_score;
+            double temp = get_temp(1e5, 0, timer.elapsed_ms(), 1000);
+            double prob = exp(diff / temp);
+
+            if (chmax(best_score, score)) {
+            //if (rnd.next_double() < prob) {
+                best_ans = path;
+                dump(best_score);
+            }
+            else {
+
+                if (r == 0) {
+                    // inc
+                    ppath[i].second--;
+                }
+                else if (r == 1) {
+                    // dec
+                    ppath[i].second++;
+                }
+                else if (r == 2) {
+                    // move
+                    ppath[i].second++; ppath[j].second--;
+                }
+
+            }
+        }
+
+        return { best_score, best_ans };
     }
-    auto crt = make_vector(0.0, N, N);
-    crt[tc.si][tc.sj] = 1.0;
-    double sum = 0.0, goal = 0.0;
-    for (int t = 0; t < ans.size(); t++) {
-        auto next = make_vector(0.0, N, N);
-        int d = c2d[ans[t]];
+
+    std::pair<double, string> solve_secondary_sub(
+        int mi, int mj, int md,
+        const vector<vector<int>>& dist1, const vector<vector<pii>>& prev1,
+        const vector<vector<int>>& dist2, const vector<vector<pii>>& prev2
+    ) {
+
+        auto to_str = [](const vector<pii>& ppath, int margin = 0) {
+            string str;
+            if (ppath.empty()) return str;
+            for (const auto [d, len] : ppath) {
+                str += string(len + margin, d2c[d]);
+            }
+            return str;
+        };
+
+        vector<pii> ppath1;
+        int i = mi, j = mj;
+        while (true) {
+            auto [d, len] = prev1[i][j];
+            if (d == -1) break;
+            ppath1.emplace_back(d, len);
+            i -= di[d] * len;
+            j -= dj[d] * len;
+        }
+        reverse(ppath1.begin(), ppath1.end());
+
+        vector<pii> ppath2;
+        i = tc.ti; j = tc.tj;
+        while (true) {
+            auto [d, len] = prev2[i][j];
+            if (d == -1) break;
+            ppath2.emplace_back(d, len + 5); // add margin?
+            i -= di[d] * len;
+            j -= dj[d] * len;
+        }
+        ppath2.emplace_back(md, 1);
+        reverse(ppath2.begin(), ppath2.end());
+
+        double best_score = -1.0;
+        string best_ans;
+        for (int margin = 0; margin <= 10; margin++) {
+            auto path1 = to_str(ppath1, margin);
+            if (path1.size() > L) continue;
+            auto path2 = to_str(ppath2);
+            string ans = path1;
+            while (ans.size() < L) ans += path2;
+            ans = ans.substr(0, L);
+            double score = compute_score(tc, ans);
+            if (chmax(best_score, score)) {
+                best_ans = ans;
+                //dump(best_score);
+            }
+        }
+
+        return { best_score, best_ans };
+    }
+
+    std::pair<double, string> solve_secondary() {
+        // "滑る"移動のみで到達できない場合
+        // なるべく近くまで移動して、複数回に分けて確率を流すイメージ
+
+        auto [si, sj, ti, tj, p, H, V] = tc;
+        auto [dist, prev] = dijkstra(si, sj);
+        if (dist[ti][tj] != inf) return { -1.0, "" };
+
+        double best_score = -1.0;
+        string best_ans;
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < N; j++) {
-                if (crt[i][j] > 0.0) {
-                    if (tc.can_move(i, j, d)) {
-                        int i2 = i + di[d];
-                        int j2 = j + dj[d];
-                        next[i2][j2] += crt[i][j] * (1.0 - tc.p);
-                        next[i][j] += crt[i][j] * tc.p;
-                    }
-                    else {
-                        next[i][j] += crt[i][j];
+                if (i == si && j == sj) continue;
+                if (dist[i][j] == inf) continue;
+                int fcost = dist[i][j];
+                for (int d = 0; d < 4; d++) {
+                    if (!tc.can_move(i, j, d)) continue;
+                    int ni = i + di[d], nj = j + dj[d];
+                    auto [dist2, prev2] = dijkstra(ni, nj);
+                    int scost = dist2[ti][tj];
+                    if (scost == inf) continue;
+                    auto [score, ans] = solve_secondary_sub(i, j, d, dist, prev, dist2, prev2);
+                    if (chmax(best_score, score)) {
+                        best_ans = ans;
                     }
                 }
             }
         }
-        crt = next;
-        sum += crt[tc.ti][tc.tj] * (2 * L - t);
-        goal += crt[tc.ti][tc.tj];
-        crt[tc.ti][tc.tj] = 0.0;
-    }
-    crt[tc.ti][tc.tj] = goal;
-    return (int)round((1e8 * sum / (2 * L)));
-}
 
-void batch_test() {
+        auto to_str = [](const vector<pii>& ppath, int margin = 0) {
+            string str;
+            if (ppath.empty()) return str;
+            for (const auto [d, len] : ppath) {
+                str += string(len + margin, d2c[d]);
+            }
+            return str;
+        };
+
+        auto to_ppath = [](string str) {
+            vector<pii> ppath;
+            char prev = '$';
+            int len = -1;
+            for (char c : str) {
+                if (prev != c) {
+                    if (prev != '$') ppath.emplace_back(c2d[prev], len);
+                    prev = c;
+                    len = 1;
+                }
+                else {
+                    len++;
+                }
+            }
+            if (len) ppath.emplace_back(c2d[prev], len);
+            return ppath;
+        };
+
+        if (best_ans.empty()) return { -1.0, "" };
+
+        auto ppath = to_ppath(best_ans);
+
+        while (timer.elapsed_ms() < 1800) {
+            int r = rnd.next_int(3);
+            int i, j;
+            if (r == 0) {
+                // inc
+                i = rnd.next_int(ppath.size());
+                ppath[i].second++;
+            }
+            else if (r == 1) {
+                // dec
+                i = rnd.next_int(ppath.size());
+                if (ppath[i].second == 0) continue;
+                ppath[i].second--;
+            }
+            else if (r == 2) {
+                // move
+                i = rnd.next_int(ppath.size());
+                do {
+                    j = rnd.next_int(ppath.size());
+                } while (i == j);
+                if (ppath[i].second == 0) continue;
+                ppath[i].second--; ppath[j].second++;
+            }
+
+            auto path = to_str(ppath);
+            double score = compute_score(tc, path);
+
+            if (chmax(best_score, score)) {
+                //if (rnd.next_double() < prob) {
+                best_ans = path;
+                dump(best_score);
+            }
+            else {
+
+                if (r == 0) {
+                    // inc
+                    ppath[i].second--;
+                }
+                else if (r == 1) {
+                    // dec
+                    ppath[i].second++;
+                }
+                else if (r == 2) {
+                    // move
+                    ppath[i].second++; ppath[j].second--;
+                }
+
+            }
+        }
+
+        return { best_score, best_ans };
+    }
+
+    std::pair<double, string> solve() {
+
+        calc_dist_straight();
+
+        auto [best_score, best_ans] = solve_primary();
+        {
+            auto [score, ans] = solve_secondary();
+            if (chmax(best_score, score)) best_ans = ans;
+        }
+
+        return { best_score, best_ans };
+    }
+};
+
+
+
+void batch_test(int seed_begin = 0, int num_seed = 100) {
 
     ll total = 0;
 
-    for (int seed = 0; seed < 100; seed++) {
+    for (int seed = seed_begin; seed < seed_begin + num_seed; seed++) {
         std::ifstream ifs(format("tools/in/%04d.txt", seed));
         std::istream& in = ifs;
         std::ofstream ofs(format("tools/out/%04d.txt", seed));
@@ -393,11 +691,12 @@ void batch_test() {
         TestCase tc(in);
 
         Solver solver(tc);
-        auto ans = solver.solve();
+        auto [score, ans] = solver.solve();
 
         total += compute_score(tc, ans);
 
         dump(seed, compute_score(tc, ans));
+        dump(ans);
 
         out << ans << endl;
 
@@ -418,6 +717,7 @@ int main(int argc, char** argv) {
 
 #ifdef _MSC_VER
     batch_test();
+    //batch_test(38, 1);
 #else
     std::istream& in = cin;
     std::ostream& out = cout;
@@ -425,9 +725,9 @@ int main(int argc, char** argv) {
     TestCase tc(in);
 
     Solver solver(tc);
-    auto ans = solver.solve();
+    auto [score, ans] = solver.solve();
 
-    dump(ans);
+    dump(score, ans);
 
     out << ans << endl;
 
